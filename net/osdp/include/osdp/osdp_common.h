@@ -7,9 +7,8 @@
 #ifndef _OSDP_COMMON_H_
 #define _OSDP_COMMON_H_
 
+#include <os/os_mempool.h>
 #include "osdp/osdp.h"
-#include "osdp/queue.h"
-#include "osdp/slab.h"
 #include "osdp/osdp_utils.h"
 
 #ifndef NULL
@@ -249,9 +248,33 @@ struct osdp_secure_channel {
     uint8_t pd_cryptogram[16];
 };
 
+typedef struct node {
+    TAILQ_ENTRY(node) entry;
+} node_t;
+
+typedef TAILQ_HEAD(queue, node) queue_t;
+
+struct pd_event_node {
+    node_t pd_node;
+    struct osdp_event object;
+};
+
+struct cp_cmd_node {
+    node_t cp_node;
+    struct osdp_cmd object;
+};
+
+/* Adjust pool size based on CP vs PD mode */
+#if MYNEWT_VAL(OSDP_MODE_PD)
+#define POOL_SIZE OS_MEMPOOL_SIZE(MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE), sizeof(struct pd_event_node))
+#else
+#define POOL_SIZE OS_MEMPOOL_SIZE(MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE), sizeof(struct cp_cmd_node))
+#endif
+
 struct osdp_queue {
     queue_t queue;
-    slab_t slab;
+    struct os_mempool pool;
+    os_membuf_t pool_buf[POOL_SIZE];
 };
 
 struct osdp_pd {

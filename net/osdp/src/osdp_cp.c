@@ -61,27 +61,35 @@
 #define OSDP_CP_ERR_CAN_YIELD          3
 #define OSDP_CP_ERR_INPROG             4
 
-struct cp_cmd_node {
-    queue_node_t node;
-    struct osdp_cmd object;
-};
-
 static int
-cp_cmd_queue_init(struct osdp_pd *pd)
+cp_cmd_queue_init(struct osdp_pd *pd, int num)
 {
-    if (slab_init(&pd->cmd.slab, sizeof(struct cp_cmd_node),
-          MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE))) {
-        OSDP_LOG_ERROR("Failed to initialize command slab\n");
+    int rc;
+    /* Enough to hold cp_cmd_pool + 3 digits + null terminator */
+    char pool_name[15] = {0};
+
+    sprintf(pool_name, "cp_cmd_pool%d", num);
+
+    rc = os_mempool_init(&pd->cmd.pool,
+          MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE),
+          sizeof(struct cp_cmd_node),
+          pd->cmd.pool_buf, pool_name);
+
+    if (rc != OS_OK) {
+        OSDP_LOG_ERROR("Failed to initialize command pool\n");
         return -1;
     }
-    queue_init(&pd->cmd.queue);
-    return 0;
+
+    pd->cmd.queue.tqh_first = NULL;
+    pd->cmd.queue.tqh_last = &pd->cmd.queue.tqh_first;
+
+    return rc;
 }
 
 static void
 cp_cmd_queue_del(struct osdp_pd *pd)
 {
-    slab_del(&pd->cmd.slab);
+    /* Unregister pool? */
 }
 
 static struct osdp_cmd *
@@ -89,10 +97,12 @@ cp_cmd_alloc(struct osdp_pd *pd)
 {
     struct cp_cmd_node *cmd = NULL;
 
-    if (slab_alloc(&pd->cmd.slab, (void **)&cmd)) {
-        OSDP_LOG_ERROR("Command slab allocation failed\n");
+    cmd = os_memblock_get(&pd->cmd.pool);
+    if (cmd == NULL) {
+        OSDP_LOG_ERROR("Command pool allocation failed\n");
         return NULL;
     }
+
     return &cmd->object;
 }
 
@@ -102,7 +112,7 @@ cp_cmd_free(struct osdp_pd *pd, struct osdp_cmd *cmd)
     struct cp_cmd_node *n;
 
     n = CONTAINER_OF(cmd, struct cp_cmd_node, object);
-    slab_free(&pd->cmd.slab, n);
+    os_memblock_put(&pd->cmd.pool, n);
 }
 
 static void
@@ -111,19 +121,22 @@ cp_cmd_enqueue(struct osdp_pd *pd, struct osdp_cmd *cmd)
     struct cp_cmd_node *n;
 
     n = CONTAINER_OF(cmd, struct cp_cmd_node, object);
-    queue_enqueue(&pd->cmd.queue, &n->node);
+    TAILQ_INSERT_HEAD(&pd->cmd.queue, &n->cp_node, entry);
 }
 
 static int
 cp_cmd_dequeue(struct osdp_pd *pd, struct osdp_cmd **cmd)
 {
     struct cp_cmd_node *n;
-    queue_node_t *node;
+    node_t *node;
 
-    if (queue_dequeue(&pd->cmd.queue, &node)) {
+    node = TAILQ_LAST(&pd->cmd.queue, queue);
+    if (node == NULL) {
         return -1;
     }
-    n = CONTAINER_OF(node, struct cp_cmd_node, node);
+    TAILQ_REMOVE(&pd->cmd.queue, node, entry);
+
+    n = CONTAINER_OF(node, struct cp_cmd_node, cp_node);
     *cmd = &n->object;
     return 0;
 }
@@ -1083,7 +1096,7 @@ osdp_cp_setup(struct osdp_ctx *osdp_ctx, int num_pd, osdp_pd_info_t *info,
         pd->address = p->address;
         pd->flags = p->flags;
         pd->seq_number = -1;
-        if (cp_cmd_queue_init(pd)) {
+        if (cp_cmd_queue_init(pd, i)) {
             goto error;
         }
         memcpy(&pd->channel, &p->channel, sizeof(struct osdp_channel));

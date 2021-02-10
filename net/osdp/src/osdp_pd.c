@@ -68,27 +68,30 @@ static struct osdp_pd_cap osdp_pd_cap[] = {
     { -1, 0, 0 } /* Sentinel */
 };
 
-struct pd_event_node {
-    queue_node_t node;
-    struct osdp_event object;
-};
-
 static int
 pd_event_queue_init(struct osdp_pd *pd)
 {
-    if (slab_init(&pd->event.slab, sizeof(struct pd_event_node),
-          MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE))) {
-        OSDP_LOG_ERROR("Failed to initialize command slab\n");
+    int rc;
+    rc = os_mempool_init(&pd->event.pool,
+          MYNEWT_VAL(OSDP_PD_COMMAND_QUEUE_SIZE),
+          sizeof(struct pd_event_node),
+          pd->event.pool_buf, "pd_event_pool");
+
+    if (rc != OS_OK) {
+        OSDP_LOG_ERROR("Failed to initialize command pool\n");
         return -1;
     }
-    queue_init(&pd->event.queue);
-    return 0;
+
+    pd->event.queue.tqh_first = NULL;
+    pd->event.queue.tqh_last = &pd->event.queue.tqh_first;
+
+    return rc;
 }
 
 static void
 pd_event_queue_del(struct osdp_pd *pd)
 {
-    slab_del(&pd->event.slab);
+    /* Unregister pool? */
 }
 
 static struct osdp_event *
@@ -96,10 +99,13 @@ pd_event_alloc(struct osdp_pd *pd)
 {
     struct pd_event_node *event = NULL;
 
-    if (slab_alloc(&pd->event.slab, (void **)&event)) {
-        OSDP_LOG_ERROR("Event slab allocation failed\n");
+    event = os_memblock_get(&pd->event.pool);
+
+    if (event == NULL) {
+        OSDP_LOG_ERROR("Event pool allocation failed\n");
         return NULL;
     }
+
     return &event->object;
 }
 
@@ -109,7 +115,8 @@ pd_event_free(struct osdp_pd *pd, struct osdp_event *event)
     struct pd_event_node *n;
 
     n = CONTAINER_OF(event, struct pd_event_node, object);
-    slab_free(&pd->event.slab, n);
+
+    os_memblock_put(&pd->event.pool, n);
 }
 
 static void
@@ -118,19 +125,23 @@ pd_event_enqueue(struct osdp_pd *pd, struct osdp_event *event)
     struct pd_event_node *n;
 
     n = CONTAINER_OF(event, struct pd_event_node, object);
-    queue_enqueue(&pd->event.queue, &n->node);
+
+    TAILQ_INSERT_HEAD(&pd->event.queue, &n->pd_node, entry);
 }
 
 static int
 pd_event_dequeue(struct osdp_pd *pd, struct osdp_event **event)
 {
     struct pd_event_node *n;
-    queue_node_t *node;
+    node_t *node;
 
-    if (queue_dequeue(&pd->event.queue, &node)) {
+    node = TAILQ_LAST(&pd->event.queue, queue);
+    if (node == NULL) {
         return -1;
     }
-    n = CONTAINER_OF(node, struct pd_event_node, node);
+    TAILQ_REMOVE(&pd->event.queue, node, entry);
+
+    n = CONTAINER_OF(node, struct pd_event_node, pd_node);
     *event = &n->object;
     return 0;
 }

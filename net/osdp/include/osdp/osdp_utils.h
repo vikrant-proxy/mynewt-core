@@ -83,31 +83,6 @@
 #endif
 
 /**
- * @brief Check p to be not NULL before calling safe_free()
- *
- * @param p pointer to be free-ed
- */
-void safe_free(void *p);
-
-/**
- * @brief safe_* variants of the standard alloc methods do a check on the
- * returned pointer and will call exit() if any of the returned NULL. The
- * safe_free() method will check if pointer is NULL before calling safe_free().
- */
-void  safe_free(void *p);
-void *safe_malloc(size_t size);
-void *safe_calloc(size_t count, size_t size);
-void *safe_realloc(void *data, size_t size);
-void *safe_strdup(const char *s);
-void *safe_realloc_zero(void *data, size_t old_size, size_t new_size);
-
-/**
- * @brief Rounds up 32-bit v to nearest power of 2. If v is already a power
- * of 2 it is returned unmodified.
- */
-uint32_t round_up_pow2(uint32_t v);
-
-/**
  * @brief Dumps an array of bytes in HEX and ASCII formats for debugging. `head`
  * is string that is printed before the actual bytes are dumped.
  *

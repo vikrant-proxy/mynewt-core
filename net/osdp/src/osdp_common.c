@@ -20,7 +20,6 @@
 
 #include "osdp/osdp_common.h"
 #include "osdp/osdp_hooks.h"
-#include "osdp/slab.h"
 
 /*
  * Set this to size of the UART buffer length and add block size
