@@ -18,7 +18,6 @@
  */
 
 #include <string.h>
-#include "nrfx.h"
 #include "mcu/cmsis_nvic.h"
 #include "trng/trng.h"
 #include "trng_nrf52/trng_nrf52.h"

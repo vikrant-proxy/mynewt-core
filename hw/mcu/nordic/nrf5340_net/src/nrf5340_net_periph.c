@@ -39,11 +39,6 @@
 #include <bus/drivers/i2c_nrf5340.h>
 #endif
 
-#if MYNEWT_VAL(TRNG)
-#include "trng/trng.h"
-#include "trng_nrf52/trng_nrf52.h"
-#endif
-
 #if MYNEWT_VAL(UART_0)
 static struct uart_dev os_bsp_uart0;
 static const struct nrf5340_net_uart_cfg os_bsp_uart0_cfg = {
@@ -79,10 +74,6 @@ static const struct bus_i2c_dev_cfg i2c0_cfg = {
     .pin_scl = MYNEWT_VAL(I2C_0_PIN_SCL),
 };
 static struct bus_i2c_dev i2c0_bus;
-#endif
-
-#if MYNEWT_VAL(TRNG)
-static struct trng_dev os_bsp_trng;
 #endif
 
 static void
@@ -162,21 +153,6 @@ nrf5340_net_periph_create_i2c(void)
 #endif
 }
 
-static void
-nrf5340_net_periph_create_trng(void)
-{
-    int rc;
-
-    (void)rc;
-
-#if MYNEWT_VAL(TRNG)
-    rc = os_dev_create(&os_bsp_trng.dev, "trng",
-                       OS_DEV_INIT_KERNEL, OS_DEV_INIT_PRIO_DEFAULT,
-                       nrf52_trng_dev_init, NULL);
-    assert(rc == 0);
-#endif
-}
-
 void
 nrf5340_net_periph_create(void)
 {
@@ -184,5 +160,4 @@ nrf5340_net_periph_create(void)
     nrf5340_net_periph_create_uart();
     nrf5340_net_periph_create_spi();
     nrf5340_net_periph_create_i2c();
-    nrf5340_net_periph_create_trng();
 }
