@@ -156,6 +156,42 @@ enum osdp_pd_cap_function_code_e {
     OSDP_PD_CAP_SENTINEL
 };
 
+typedef enum {
+    /* Peripheral device errors */
+    OSDP_DIAG_NOTIFY_PD_SC_TIMEOUT,
+    OSDP_DIAG_NOTIFY_PD_NON_SC_TIMEOUT,
+    OSDP_DIAG_NOTIFY_PD_OOM,
+    OSDP_DIAG_NOTIFY_PD_NOT_CAPABLE,
+    OSDP_DIAG_NOTIFY_PD_LEN_ERR,
+    OSDP_DIAG_NOTIFY_PD_RECORD_ERR,
+    OSDP_DIAG_NOTIFY_PD_RECV_ERR_TMO,
+    OSDP_DIAG_NOTIFY_PD_KEYSET_INVALID,
+    OSDP_DIAG_NOTIFY_PD_CH_SEND_FAIL,
+    OSDP_DIAG_NOTIFY_PD_COMSET_FAIL,
+    OSDP_DIAG_NOTIFY_PD_UNKNOWN_CMD,
+    OSDP_DIAG_NOTIFY_PD_KEYSET_NO_SC,
+    OSDP_DIAG_NOTIFY_PD_SC_ENFORCE_ERR,
+    OSDP_DIAG_NOTIFY_PD_INV_CMD_STRUCT,
+
+    /* Physical layer errors */
+    OSDP_DIAG_NOTIFY_PHY_SC_PLAINTEXT,
+    OSDP_DIAG_NOTIFY_PHY_SC_NOT_CAPABLE,
+    OSDP_DIAG_NOTIFY_PHY_DECRYPT_FAIL,
+    OSDP_DIAG_NOTIFY_PHY_NONCONFORMANT,
+    OSDP_DIAG_NOTIFY_PHY_MARK_VALID_FAIL,
+    OSDP_DIAG_NOTIFY_PHY_SOM_VALID_FAIL,
+    OSDP_DIAG_NOTIFY_PHY_OOM,
+    OSDP_DIAG_NOTIFY_PHY_INV_HDR,
+    OSDP_DIAG_NOTIFY_PHY_INV_SB,
+    OSDP_DIAG_NOTIFY_PHY_INV_MAC,
+    OSDP_DIAG_NOTIFY_PHY_INV_SOM,
+    OSDP_DIAG_NOTIFY_PHY_INV_CRC,
+    OSDP_DIAG_NOTIFY_PHY_INV_CHECKSUM,
+    OSDP_DIAG_NOTIFY_PHY_INV_ADDR,
+    OSDP_DIAG_NOTIFY_PHY_NOTSUP,
+    OSDP_DIAG_NOTIFY_PHY_SEQ_MISMATCH
+} osdp_diag_notify_e_t;
+
 /**
  * @brief PD capability structure. Each PD capability has a 3 byte
  * representation.
@@ -542,6 +578,7 @@ struct osdp_event {
 
 typedef int (*pd_command_callback_t)(void *arg, struct osdp_cmd *c);
 typedef int (*cp_event_callback_t)(void *arg, int addr, struct osdp_event *ev);
+typedef int (*diagnostic_notify_callback_t)(osdp_diag_notify_e_t ev);
 
 /**
  * @brief OSDP PD Information. This struct is used to describe a PD to LibOSDP.
@@ -567,6 +604,7 @@ typedef struct {
     struct osdp_pd_cap *cap;
     struct osdp_channel channel;
     pd_command_callback_t pd_cb;
+    diagnostic_notify_callback_t diag_cb;
     cp_event_callback_t cp_cb;
 } osdp_pd_info_t;
 

@@ -105,6 +105,9 @@ osdp_phy_packet_init(struct osdp_pd *pd, uint8_t *buf, int max_len)
     exp_len = sizeof(struct osdp_packet_header) + 64; /* 64 is estimated */
     if (max_len < exp_len) {
         OSDP_LOG_ERROR("packet_init: out of space! CMD: %02x\n", pd->cmd_id);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_OOM);
+        }
         return OSDP_ERR_PKT_FMT;
     }
 
@@ -161,6 +164,9 @@ osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
     /* Do a sanity check only; we expect expect header to be prefilled */
     if ((unsigned long)len <= sizeof(struct osdp_packet_header)) {
         OSDP_LOG_ERROR("PKT_F: Invalid header\n");
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_HDR);
+        }
         return OSDP_ERR_PKT_FMT;
     }
 
@@ -168,6 +174,9 @@ osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
         if (buf[0] != OSDP_PKT_MARK) {
             OSDP_LOG_ERROR("PKT_F: MARK validation failed! ID: 0x%02x\n",
           is_cmd ? pd->cmd_id : pd->reply_id);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_MARK_VALID_FAIL);
+            }
             return OSDP_ERR_PKT_FMT;
         }
         /* temporarily get rid of mark byte */
@@ -179,6 +188,9 @@ osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
     if (pkt->som != OSDP_PKT_SOM) {
         OSDP_LOG_ERROR("PKT_F: header SOM validation failed! ID: 0x%02x\n",
         is_cmd ? pd->cmd_id : pd->reply_id);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_SOM_VALID_FAIL);
+        }
         return OSDP_ERR_PKT_FMT;
     }
 
@@ -248,6 +260,9 @@ osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
 
 out_of_space_error:
     OSDP_LOG_ERROR("PKT_F: Out of buffer space! CMD(%02x)\n", pd->cmd_id);
+    if (pd->diagnostic_callback) {
+        pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_OOM);
+    }
     return OSDP_ERR_PKT_FMT;
 }
 
@@ -277,6 +292,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
     /* validate packet header */
     if (pkt->som != OSDP_PKT_SOM) {
         OSDP_LOG_ERROR("Invalid SOM 0x%02x\n", pkt->som);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_SOM);
+        }
         return OSDP_ERR_PKT_FMT;
     }
 
@@ -302,6 +320,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
         comp = osdp_compute_crc16(buf, pkt_len);
         if (comp != cur) {
             OSDP_LOG_ERROR("Invalid crc 0x%04x/0x%04x\n", comp, cur);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_CRC);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
             return OSDP_ERR_PKT_CHECK;
@@ -312,6 +333,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
         comp = osdp_compute_checksum(buf, pkt_len);
         if (comp != cur) {
             OSDP_LOG_ERROR("Invalid checksum %02x/%02x\n", comp, cur);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_CHECKSUM);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
             return OSDP_ERR_PKT_CHECK;
@@ -324,6 +348,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
         /* not addressed to us and was not broadcasted */
         if (!ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
             OSDP_LOG_ERROR("Invalid pd address %d\n", pd_addr);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_ADDR);
+            }
             return OSDP_ERR_PKT_FMT;
         }
         return OSDP_ERR_PKT_SKIP;
@@ -350,6 +377,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
              * same sequence number again.
              */
             OSDP_LOG_ERROR("seq-repeat/reply-resend not supported!\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_NOTSUP);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
             return OSDP_ERR_PKT_FMT;
@@ -370,6 +400,9 @@ osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
     cur = osdp_phy_get_seq_number(pd, ISSET_FLAG(pd, PD_FLAG_PD_MODE));
     if (cur != comp && !ISSET_FLAG(pd, PD_FLAG_SKIP_SEQ_CHECK)) {
         OSDP_LOG_ERROR("packet seq mismatch %d/%d\n", cur, comp);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_SEQ_MISMATCH);
+        }
         pd->reply_id = REPLY_NAK;
         pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
         return OSDP_ERR_PKT_FMT;
@@ -402,12 +435,18 @@ osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
         if (ISSET_FLAG(pd, PD_FLAG_PD_MODE) &&
             !ISSET_FLAG(pd, PD_FLAG_SC_CAPABLE)) {
             OSDP_LOG_ERROR("PD is not SC capable\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_SC_NOT_CAPABLE);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SC_UNSUP;
             return OSDP_ERR_PKT_FMT;
         }
         if (pkt->data[1] < SCS_11 || pkt->data[1] > SCS_18) {
             OSDP_LOG_ERROR("Invalid SB Type\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_SB);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
             return OSDP_ERR_PKT_FMT;
@@ -430,6 +469,9 @@ osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
     } else {
         if (ISSET_FLAG(pd, PD_FLAG_SC_ACTIVE)) {
             OSDP_LOG_ERROR("Received plain-text message in SC\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_SC_PLAINTEXT);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
             return OSDP_ERR_PKT_FMT;
@@ -445,6 +487,9 @@ osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
         mac = is_cmd ? pd->sc.c_mac : pd->sc.r_mac;
         if (memcmp(buf + mac_offset, mac, 4) != 0) {
             OSDP_LOG_ERROR("Invalid MAC; discarding SC\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_INV_MAC);
+            }
             CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
@@ -467,6 +512,9 @@ osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
             len = osdp_decrypt_data(pd, is_cmd, data + 1, len - 1);
             if (len < 0) {
                 OSDP_LOG_ERROR("Failed at decrypt; discarding SC\n");
+                if (pd->diagnostic_callback) {
+                    pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_DECRYPT_FAIL);
+                }
                 CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
                 pd->reply_id = REPLY_NAK;
                 pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
@@ -480,6 +528,9 @@ osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
                  */
                 OSDP_LOG_INFO("Received encrypted data block with 0 "
                     "length; tolerating non-conformance!\n");
+                if (pd->diagnostic_callback) {
+                    pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PHY_NONCONFORMANT);
+                }
             }
             len += 1; /* put back cmd/reply ID */
         }

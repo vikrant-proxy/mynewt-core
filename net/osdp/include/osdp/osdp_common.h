@@ -313,6 +313,7 @@ struct osdp_pd {
     struct osdp_channel channel;
     struct osdp_secure_channel sc;
     void *command_callback_arg;
+    diagnostic_notify_callback_t diagnostic_callback;
     pd_command_callback_t command_callback;
     struct os_mutex lock; /* Manage access to pool + queue */
 };
