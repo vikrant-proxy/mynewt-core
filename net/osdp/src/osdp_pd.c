@@ -61,11 +61,6 @@ static struct osdp_pd_cap osdp_pd_cap[] = {
         1, /* The PD supports the 16-bit CRC-16 mode */
         0, /* N/A */
     },
-    {
-        OSDP_PD_CAP_COMMUNICATION_SECURITY,
-        1, /* (Bit-0) AES128 support */
-        0, /* N/A */
-    },
     { -1, 0, 0 } /* Sentinel */
 };
 
@@ -324,6 +319,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
             pd->cmd_id != CMD_CHLNG && pd->cmd_id != CMD_SCRYPT) {
             OSDP_LOG_ERROR("CMD(%02x) not allowed due to ENFORCE_SECURE\n",
           pd->cmd_id);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_SC_ENFORCE_ERR);
+            }
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_RECORD;
             return OSDP_PD_ERR_REPLY;
@@ -336,6 +334,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
         OSDP_LOG_INFO("PD is not capable of handling CMD(%02x); "  \
         "Reply with NAK_CMD_UNKNOWN\n", pd->cmd_id);   \
         ret = OSDP_PD_ERR_REPLY;                             \
+        if (pd->diagnostic_callback) {                      \
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_NOT_CAPABLE);    \
+        }                                                  \
         break;                                               \
     }
 
@@ -343,6 +344,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
     if (got != exp) {                                            \
         OSDP_LOG_ERROR("CMD(%02x) length error! Got:%d, Exp:%d\n",    \
         pd->cmd_id, got, exp);                       \
+        if (pd->diagnostic_callback) {                      \
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_LEN_ERR);    \
+        }                                                  \
         return OSDP_PD_ERR_GENERIC;                          \
     }
 
@@ -356,6 +360,7 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
             pd->reply_id = REPLY_ACK;
         }
         ret = OSDP_PD_ERR_NONE;
+        SET_FLAG(pd, PD_FLAG_CP_POLL_ACTIVE);
         break;
     case CMD_LSTAT:
         ASSERT_LENGTH(len, CMD_LSTAT_DATA_LEN);
@@ -513,6 +518,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
              cmd.comset.baud_rate != 38400 &&
              cmd.comset.baud_rate != 115200)) {
             OSDP_LOG_ERROR("COMSET Failed! command discarded\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_COMSET_FAIL);
+            }
             cmd.comset.address = pd->address;
             cmd.comset.baud_rate = pd->baud_rate;
         }
@@ -539,6 +547,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
         cmd.mfg.length = len - CMD_MFG_DATA_LEN;
         if (cmd.mfg.length > OSDP_CMD_MFG_MAX_DATALEN) {
             OSDP_LOG_ERROR("cmd length error\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_LEN_ERR);
+            }
             break;
         }
         for (i = 0; i < cmd.mfg.length; i++) {
@@ -570,12 +581,18 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
             pd->reply_id = REPLY_NAK;
             pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
             OSDP_LOG_ERROR("Keyset with SC inactive\n");
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_KEYSET_NO_SC);
+            }
             break;
         }
         /* only key_type == 1 (SCBK) and key_len == 16 is supported */
         if (buf[pos] != 1 || buf[pos + 1] != 16) {
             OSDP_LOG_ERROR("Keyset invalid len/type: %d/%d\n",
             buf[pos], buf[pos + 1]);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_KEYSET_INVALID);
+            }
             break;
         }
         cmd.id = OSDP_CMD_KEYSET;
@@ -623,6 +640,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
         break;
     default:
         OSDP_LOG_ERROR("Unknown command ID %02x\n", pd->cmd_id);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_UNKNOWN_CMD);
+        }
         pd->reply_id = REPLY_NAK;
         pd->ephemeral_data[0] = OSDP_PD_NAK_CMD_UNKNOWN;
         ret = OSDP_PD_ERR_NONE;
@@ -632,6 +652,9 @@ pd_decode_command(struct osdp_pd *pd, uint8_t *buf, int len)
     if (ret != 0 && ret != OSDP_PD_ERR_REPLY) {
         OSDP_LOG_ERROR("Invalid command structure. CMD: %02x, Len: %d ret: %d\n",
         pd->cmd_id, len, ret);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_INV_CMD_STRUCT);
+        }
         pd->reply_id = REPLY_NAK;
         pd->ephemeral_data[0] = OSDP_PD_NAK_CMD_LEN;
         return OSDP_PD_ERR_REPLY;
@@ -666,6 +689,9 @@ pd_build_reply(struct osdp_pd *pd, uint8_t *buf, int max_len)
     if (max_len < need) {                                          \
         OSDP_LOG_ERROR("OOM at build REPLY(%02x) - have:%d, need:%d\n", \
         pd->reply_id, max_len, need);                  \
+        if (pd->diagnostic_callback) {                         \
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_OOM);   \
+        }                                         \
         return OSDP_PD_ERR_GENERIC;                            \
     }
 
@@ -705,6 +731,9 @@ pd_build_reply(struct osdp_pd *pd, uint8_t *buf, int max_len)
             }
             if (max_len < REPLY_PDCAP_ENTITY_LEN) {
                 OSDP_LOG_ERROR("Out of buffer space!\n");
+                if (pd->diagnostic_callback) {
+                    pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_OOM);
+                }
                 break;
             }
             buf[len++] = i;
@@ -867,6 +896,9 @@ pd_build_reply(struct osdp_pd *pd, uint8_t *buf, int max_len)
         /* catch all errors and report it as a RECORD error to CP */
         OSDP_LOG_ERROR("Failed to build REPLY(%02x); Sending NAK instead!\n",
         pd->reply_id);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_RECORD_ERR);
+        }
         ASSERT_BUF_LEN(REPLY_NAK_LEN);
         buf[0] = REPLY_NAK;
         buf[1] = OSDP_PD_NAK_RECORD;
@@ -914,6 +946,9 @@ pd_send_reply(struct osdp_pd *pd)
     ret = pd->channel.send(pd->channel.data, pd->rx_buf, len);
     if (ret != len) {
         OSDP_LOG_ERROR("Channel send for %d bytes failed! ret: %d\n", len, ret);
+        if (pd->diagnostic_callback) {
+            pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_CH_SEND_FAIL);
+        }
         return OSDP_PD_ERR_GENERIC;
     }
 
@@ -998,6 +1033,18 @@ osdp_update(struct osdp_pd *pd)
             osdp_millis_since(pd->sc_tstamp) > MYNEWT_VAL(OSDP_PD_SC_TIMEOUT_MS)) {
             OSDP_LOG_INFO("PD SC session timeout!\n");
             CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_SC_TIMEOUT);
+            }
+        }
+        /* When secure mode is inactive check if CP is polling */
+        if (ISSET_FLAG(pd, PD_FLAG_CP_POLL_ACTIVE) &&
+            osdp_millis_since(pd->tstamp) > MYNEWT_VAL(OSDP_PD_IDLE_TIMEOUT_MS)) {
+            OSDP_LOG_INFO("PD CP-poll timeout!\n");
+            CLEAR_FLAG(pd, PD_FLAG_CP_POLL_ACTIVE);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_NON_SC_TIMEOUT);
+            }
         }
         ret = pd->channel.recv(pd->channel.data, pd->rx_buf,
               sizeof(pd->rx_buf));
@@ -1016,6 +1063,9 @@ osdp_update(struct osdp_pd *pd)
         }
         if (ret != OSDP_PD_ERR_NONE && ret != OSDP_PD_ERR_REPLY) {
             OSDP_LOG_ERROR("CMD receive error/timeout - err:%d\n", ret);
+            if (pd->diagnostic_callback) {
+                pd->diagnostic_callback(OSDP_DIAG_NOTIFY_PD_RECV_ERR_TMO);
+            }
             pd->state = OSDP_PD_STATE_ERR;
             break;
         }
@@ -1110,21 +1160,37 @@ osdp_pd_setup(struct osdp_ctx *osdp_ctx, osdp_pd_info_t *info, uint8_t *scbk)
             OSDP_LOG_ERROR("SCBK must be provided in ENFORCE_SECURE\n");
             goto error;
         }
-        OSDP_LOG_WARN("SCBK not provided. PD is in INSTALL_MODE\n");
-        SET_FLAG(pd, OSDP_FLAG_INSTALL_MODE);
+        if (!ISSET_FLAG(pd, OSDP_FLAG_NON_SECURE_MODE)) {
+            OSDP_LOG_WARN("SCBK not provided. PD is in INSTALL_MODE\n");
+            SET_FLAG(pd, OSDP_FLAG_INSTALL_MODE);
+        } else {
+            OSDP_LOG_WARN("Setting up in non-secure mode\n");
+            /* Non secure mode */
+        }
     } else {
         memcpy(pd->sc.scbk, scbk, 16);
     }
-    SET_FLAG(pd, PD_FLAG_SC_CAPABLE);
+
+    /* Set secure capability based on non-secure flag */
+    if (!ISSET_FLAG(pd, OSDP_FLAG_NON_SECURE_MODE)) {
+        OSDP_LOG_INFO("PD is SC capable!\n");
+        SET_FLAG(pd, PD_FLAG_SC_CAPABLE);
+    }
+
     if (IS_ENABLED(CONFIG_OSDP_SKIP_MARK_BYTE)) {
         SET_FLAG(pd, PD_FLAG_PKT_SKIP_MARK);
     }
+    /* Set capabilities based on application */
     osdp_pd_set_attributes(pd, info->cap, &info->id);
+    /* Set implicit capabilities */
     osdp_pd_set_attributes(pd, osdp_pd_cap, NULL);
 
     SET_FLAG(pd, PD_FLAG_PD_MODE); /* used in checks in phy */
 
     osdp_pd_set_command_callback(ctx, info->pd_cb, NULL);
+    if (pd->diagnostic_callback) {
+        pd->diagnostic_callback = info->diag_cb;
+    }
 
     OSDP_LOG_INFO("PD setup complete\n");
     return (osdp_t *) ctx;
